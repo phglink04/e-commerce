@@ -142,3 +142,25 @@ export async function clearUserCart(token: string) {
 
   return true;
 }
+
+export async function mergeUserCart(
+  token: string,
+  items: Array<{ plantId: string; quantity: number; price: number }>,
+) {
+  const response = await fetch(`${API_BASE_URL}/api/cart/merge`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ cartItems: items }),
+  });
+
+  const json = (await response.json().catch(() => ({}))) as CartResponse;
+
+  if (!response.ok) {
+    throw new Error(toErrorMessage(json, "Failed to merge cart"));
+  }
+
+  return mapServerCartToStore(json.cart || []);
+}

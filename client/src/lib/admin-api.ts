@@ -273,6 +273,33 @@ export async function deleteAdminPlant(token: string, id: string) {
   return response.json();
 }
 
+export async function uploadAdminImage(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("image", file);
+
+  const response = await fetch(`${API_BASE_URL}/api/images/upload`, {
+    method: "POST",
+    body: form,
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseError(response));
+  }
+
+  const json = (await response.json()) as {
+    publicUrl?: string;
+    file?: { publicUrl?: string; url?: string };
+  };
+
+  const imageUrl = json.publicUrl || json.file?.publicUrl || json.file?.url;
+
+  if (!imageUrl) {
+    throw new Error("Image upload succeeded but URL is missing");
+  }
+
+  return imageUrl;
+}
+
 export async function addDeliveryPartner(
   token: string,
   payload: {

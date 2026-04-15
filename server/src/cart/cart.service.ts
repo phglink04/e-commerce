@@ -9,6 +9,7 @@ import { Model } from "mongoose";
 import { Plant, PlantDocument } from "../plants/schemas/plant.schema";
 import { User, UserDocument } from "../users/schemas/user.schema";
 import { AddToCartDto } from "./dto/add-to-cart.dto";
+import { MergeCartDto } from "./dto/merge-cart.dto";
 import { UpdateCartDto } from "./dto/update-cart.dto";
 
 @Injectable()
@@ -66,6 +67,64 @@ export class CartService {
     return {
       status: "success",
       cart: user.cart,
+    };
+  }
+
+  async mergeCart(userId: string, dto: MergeCartDto) {
+    const user = await this.userModel.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException("User not found");
+    }
+
+    const incomingItems = dto.cartItems ?? [];
+
+    const mergedIncoming = new Map<
+      string,
+      { quantity: number; price: number }
+    >();
+
+    for (const item of incomingItems) {
+      const key = item.plantId;
+      const existing = mergedIncoming.get(key);
+
+      if (existing) {
+        existing.quantity += item.quantity;
+        existing.price = item.price;
+      } else {
+        mergedIncoming.set(key, { quantity: item.quantity, price: item.price });
+      }
+    }
+
+    for (const [plantId, incoming] of mergedIncoming.entries()) {
+      const existingItem = user.cart.find(
+        (cartItem) => String(cartItem.plantId) === plantId,
+      );
+
+      if (existingItem) {
+        existingItem.quantity += incoming.quantity;
+        existingItem.price = incoming.price;
+        existingItem.total = existingItem.quantity * existingItem.price;
+      } else {
+        user.cart.push({
+          plantId: plantId as any,
+          quantity: incoming.quantity,
+          price: incoming.price,
+          total: incoming.quantity * incoming.price,
+        } as any);
+      }
+    }
+
+    await user.save({ validateBeforeSave: false });
+
+    const populatedUser = await this.userModel.findById(userId).populate({
+      path: "cart.plantId",
+      model: Plant.name,
+    });
+
+    return {
+      status: "success",
+      cart: populatedUser?.cart ?? user.cart,
     };
   }
 

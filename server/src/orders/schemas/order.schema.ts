@@ -42,7 +42,9 @@ export class OrderStatus {
   @Prop({
     required: true,
     enum: [
+      "Pending Payment",
       "Order Received",
+      "Processing",
       "Order Shipped",
       "Out for Delivery",
       "Order Delivered",

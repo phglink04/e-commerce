@@ -6,13 +6,17 @@ import {
 import { InjectModel } from "@nestjs/mongoose";
 import { Model } from "mongoose";
 
+import { MailService } from "../mail/mail.service";
 import { PaymentMethod, PaymentStatus } from "../common/enums/payment.enum";
 import { Order, OrderDocument } from "../orders/schemas/order.schema";
+import { User, UserDocument } from "../users/schemas/user.schema";
 
 @Injectable()
 export class PaymentsService {
   constructor(
     @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    private readonly mailService: MailService,
   ) {}
 
   async generateVietQR(orderId: string, amount?: number) {
@@ -129,7 +133,9 @@ export class PaymentsService {
   }
 
   async verifyOrderPayment(orderId: string) {
-    const order = await this.orderModel.findById(orderId);
+    const order = await this.orderModel
+      .findById(orderId)
+      .populate("items.plantId");
     if (!order) {
       throw new NotFoundException("Order not found");
     }
@@ -153,12 +159,79 @@ export class PaymentsService {
       };
     }
 
+    if (order.paymentStatus === PaymentStatus.PAID) {
+      return {
+        status: "success",
+        paid: true,
+        message: "Payment verified successfully",
+        data: {
+          orderId: order._id,
+          amount,
+          paymentStatus: order.paymentStatus,
+          referenceCode: order.referenceCode,
+        },
+      };
+    }
+
     order.paymentMethod = PaymentMethod.BANK_TRANSFER;
     order.paymentStatus = PaymentStatus.PAID;
+    order.status.push({ stage: "Processing", changedAt: new Date() });
     if (!order.referenceCode?.startsWith("PLW")) {
       order.referenceCode = `PLW${order._id.toString()}`;
     }
     await order.save();
+
+    const user = await this.userModel.findById(order.user);
+    if (!user) {
+      throw new NotFoundException("User not found for this order");
+    }
+
+    user.cart = [];
+    await user.save({ validateBeforeSave: false });
+
+    const rows = order.items
+      .map((item, idx) => {
+        const plantName =
+          (item.plantId &&
+          typeof item.plantId === "object" &&
+          "name" in item.plantId
+            ? (item.plantId as { name?: string }).name
+            : undefined) || "Plant";
+
+        return `
+          <tr>
+            <td style="padding:8px; border:1px solid #ddd;">${idx + 1}</td>
+            <td style="padding:8px; border:1px solid #ddd;">${plantName}</td>
+            <td style="padding:8px; border:1px solid #ddd;">${item.quantity}</td>
+            <td style="padding:8px; border:1px solid #ddd;">INR ${item.price}</td>
+            <td style="padding:8px; border:1px solid #ddd;">INR ${item.total}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    await this.mailService.sendEmail({
+      email: user.email,
+      subject: "Your PlantWorld Payment Confirmation",
+      message: `
+        <p>Hi <strong>${order.firstName} ${order.lastName}</strong>,</p>
+        <p>Your payment was received successfully for order <strong>${order.referenceCode}</strong>.</p>
+        <p><strong>Order Total:</strong> INR ${order.orderTotal}</p>
+        <p><strong>Expected Delivery:</strong> ${new Date(order.expectedDelivery).toDateString()}</p>
+        <table style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr>
+              <th style="padding:8px; border:1px solid #ddd; text-align:left;">#</th>
+              <th style="padding:8px; border:1px solid #ddd; text-align:left;">Plant</th>
+              <th style="padding:8px; border:1px solid #ddd; text-align:left;">Qty</th>
+              <th style="padding:8px; border:1px solid #ddd; text-align:left;">Price</th>
+              <th style="padding:8px; border:1px solid #ddd; text-align:left;">Total</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `,
+    });
 
     return {
       status: "success",

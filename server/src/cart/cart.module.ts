@@ -3,7 +3,7 @@ import { MongooseModule } from "@nestjs/mongoose";
 
 import { Plant, PlantSchema } from "../plants/schemas/plant.schema";
 import { User, UserSchema } from "../users/schemas/user.schema";
-import { CartController } from "./cart.controller";
+import { CartController, CartMergeController } from "./cart.controller";
 import { CartService } from "./cart.service";
 
 @Module({
@@ -13,7 +13,7 @@ import { CartService } from "./cart.service";
       { name: Plant.name, schema: PlantSchema },
     ]),
   ],
-  controllers: [CartController],
+  controllers: [CartController, CartMergeController],
   providers: [CartService],
 })
 export class CartModule {}

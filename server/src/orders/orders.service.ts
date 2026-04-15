@@ -42,6 +42,8 @@ export class OrdersService {
 
     const orderTotal = items.reduce((sum, item) => sum + item.total, 0);
     const expectedDelivery = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000);
+    const paymentMethod = dto.paymentMethod ?? PaymentMethod.BANK_TRANSFER;
+    const isCashPayment = paymentMethod === PaymentMethod.CASH;
     const referenceCode = dto.referenceCode
       ? await this.ensureUniqueReferenceCode(dto.referenceCode)
       : await this.generateUniqueReferenceCode();
@@ -57,11 +59,11 @@ export class OrdersService {
       totalPrice: orderTotal,
       orderTotal,
       paymentId: dto.paymentId,
-      paymentMethod: dto.paymentMethod ?? PaymentMethod.BANK_TRANSFER,
+      paymentMethod,
       paymentStatus: PaymentStatus.PENDING,
       referenceCode,
       expectedDelivery,
-      status: [{ stage: "Order Received" }],
+      status: [{ stage: isCashPayment ? "Order Received" : "Pending Payment" }],
       firstName: dto.firstName,
       lastName: dto.lastName,
       mobile: dto.mobile,
@@ -88,6 +90,15 @@ export class OrdersService {
     }
 
     user.orders.push(order._id as any);
+    await user.save({ validateBeforeSave: false });
+
+    if (!isCashPayment) {
+      return {
+        status: "success",
+        order,
+      };
+    }
+
     user.cart = [];
     await user.save({ validateBeforeSave: false });
 

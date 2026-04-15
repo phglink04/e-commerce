@@ -377,7 +377,6 @@ export default function AddressFormPage() {
           onPaidSuccess={async () => {
             await clearUserCart(token);
             clearCart();
-            router.push("/order-success");
           }}
         />
       )}

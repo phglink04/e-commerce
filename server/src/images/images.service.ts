@@ -4,9 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
-import { InjectConnection } from "@nestjs/mongoose";
-import { GridFSBucket, ObjectId } from "mongodb";
-import { Connection } from "mongoose";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 type UploadedImageFile = {
   originalname: string;
@@ -16,20 +14,52 @@ type UploadedImageFile = {
 
 @Injectable()
 export class ImagesService {
-  private readonly bucketName = "uploads";
+  private readonly bucketName = "plantworld-images";
+  private readonly supabase: SupabaseClient;
 
-  constructor(@InjectConnection() private readonly connection: Connection) {}
+  constructor() {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_KEY;
 
-  private getBucket(): GridFSBucket {
-    if (!this.connection.db) {
+    if (!supabaseUrl || !supabaseKey) {
       throw new InternalServerErrorException(
-        "Database connection not initialized",
+        "SUPABASE_URL or SUPABASE_KEY is missing",
       );
     }
 
-    return new GridFSBucket(this.connection.db, {
-      bucketName: this.bucketName,
-    });
+    this.supabase = createClient(supabaseUrl, supabaseKey);
+  }
+
+  private buildUniqueFilename(originalname: string) {
+    const safeName = originalname
+      .replace(/\s+/g, "_")
+      .replace(/[^a-zA-Z0-9._-]/g, "");
+
+    return `${Date.now()}_${safeName}`;
+  }
+
+  private extractFilePathFromUrl(fileUrl: string) {
+    try {
+      const parsed = new URL(fileUrl);
+      const marker = `/${this.bucketName}/`;
+      const markerIndex = parsed.pathname.indexOf(marker);
+
+      if (markerIndex === -1) {
+        throw new BadRequestException("Invalid Supabase file URL");
+      }
+
+      const filePath = decodeURIComponent(
+        parsed.pathname.slice(markerIndex + marker.length),
+      );
+
+      if (!filePath) {
+        throw new BadRequestException("Unable to extract file path from URL");
+      }
+
+      return filePath;
+    } catch {
+      throw new BadRequestException("Invalid file URL");
+    }
   }
 
   async uploadImage(file: UploadedImageFile | undefined) {
@@ -41,62 +71,65 @@ export class ImagesService {
       throw new BadRequestException("Only image uploads are allowed");
     }
 
-    const safeOriginalName = file.originalname.replace(/\s+/g, "_");
-    const filename = `plant_${Date.now()}_${safeOriginalName}`;
+    const filename = this.buildUniqueFilename(file.originalname);
 
-    const bucket = this.getBucket();
+    const { error } = await this.supabase.storage
+      .from(this.bucketName)
+      .upload(filename, file.buffer, {
+        contentType: file.mimetype,
+        upsert: false,
+      });
 
-    const uploaded = await new Promise<{ id: ObjectId; filename: string }>(
-      (resolve, reject) => {
-        const uploadStream = bucket.openUploadStream(filename, {
-          contentType: file.mimetype,
-        });
+    if (error) {
+      throw new InternalServerErrorException(
+        `Failed to upload image: ${error.message}`,
+      );
+    }
 
-        uploadStream.on("error", () => {
-          reject(new InternalServerErrorException("Failed to upload image"));
-        });
-
-        uploadStream.on(
-          "finish",
-          (result: { _id: ObjectId; filename: string }) => {
-            resolve({ id: result._id, filename: result.filename });
-          },
-        );
-
-        uploadStream.end(file.buffer);
-      },
-    );
+    const {
+      data: { publicUrl },
+    } = this.supabase.storage.from(this.bucketName).getPublicUrl(filename);
 
     return {
       status: "success",
+      publicUrl,
       file: {
-        id: String(uploaded.id),
-        filename: uploaded.filename,
-        url: `/images/${uploaded.filename}`,
+        filename,
+        path: filename,
+        publicUrl,
       },
     };
   }
 
-  async getImageStream(filename: string) {
-    if (!this.connection.db) {
+  async deleteImage(fileUrl: string | undefined) {
+    if (!fileUrl) {
+      return { status: "success", deleted: false };
+    }
+
+    const filePath = this.extractFilePathFromUrl(fileUrl);
+
+    const { error } = await this.supabase.storage
+      .from(this.bucketName)
+      .remove([filePath]);
+
+    if (error) {
       throw new InternalServerErrorException(
-        "Database connection not initialized",
+        `Failed to delete image: ${error.message}`,
       );
     }
 
-    const bucket = this.getBucket();
-    const files = await this.connection.db
-      .collection(`${this.bucketName}.files`)
-      .find({ filename })
-      .toArray();
+    return {
+      status: "success",
+      deleted: true,
+      filePath,
+    };
+  }
 
-    const file = files[0] as { contentType?: string } | undefined;
-
-    if (!file || !file.contentType?.startsWith("image")) {
-      throw new NotFoundException("Image not found");
-    }
-
-    const stream = bucket.openDownloadStreamByName(filename);
-    return { stream, contentType: file.contentType };
+  async getImageStream(
+    filename: string,
+  ): Promise<{ stream: NodeJS.ReadableStream; contentType: string }> {
+    throw new NotFoundException(
+      `Image stream endpoint is no longer supported with Supabase storage: ${filename}`,
+    );
   }
 }

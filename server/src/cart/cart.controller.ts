@@ -12,6 +12,7 @@ import {
 
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { AddToCartDto } from "./dto/add-to-cart.dto";
+import { MergeCartDto } from "./dto/merge-cart.dto";
 import { UpdateCartDto } from "./dto/update-cart.dto";
 import { CartService } from "./cart.service";
 
@@ -62,5 +63,19 @@ export class CartController {
   @Get("cart/total")
   getCartTotal(@Req() req: { user: { userId: string } }) {
     return this.cartService.getCartTotal(req.user.userId);
+  }
+}
+
+@Controller("cart")
+@UseGuards(JwtAuthGuard)
+export class CartMergeController {
+  constructor(private readonly cartService: CartService) {}
+
+  @Post("merge")
+  mergeCart(
+    @Req() req: { user: { userId: string } },
+    @Body() dto: MergeCartDto,
+  ) {
+    return this.cartService.mergeCart(req.user.userId, dto);
   }
 }

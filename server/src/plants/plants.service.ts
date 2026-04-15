@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { FilterQuery, Model } from "mongoose";
 
+import { ImagesService } from "../images/images.service";
 import { CreatePlantDto } from "./dto/create-plant.dto";
 import { UpdatePlantDto } from "./dto/update-plant.dto";
 import { Plant, PlantDocument } from "./schemas/plant.schema";
@@ -10,6 +11,7 @@ import { Plant, PlantDocument } from "./schemas/plant.schema";
 export class PlantsService {
   constructor(
     @InjectModel(Plant.name) private readonly plantModel: Model<PlantDocument>,
+    private readonly imagesService: ImagesService,
   ) {}
 
   async getAll(query: Record<string, string>) {
@@ -70,6 +72,11 @@ export class PlantsService {
   }
 
   async update(id: string, dto: UpdatePlantDto) {
+    const existingPlant = await this.plantModel.findById(id);
+    if (!existingPlant) {
+      throw new NotFoundException("No plant found with that ID");
+    }
+
     if (dto.quantity !== undefined) {
       if (dto.quantity <= 0) {
         dto.availability = "Out Of Stock";
@@ -84,8 +91,16 @@ export class PlantsService {
       runValidators: true,
     });
 
-    if (!plant) {
-      throw new NotFoundException("No plant found with that ID");
+    if (
+      dto.imageCover &&
+      existingPlant.imageCover &&
+      dto.imageCover !== existingPlant.imageCover
+    ) {
+      await this.imagesService
+        .deleteImage(existingPlant.imageCover)
+        .catch(() => {
+          return null;
+        });
     }
 
     return {
@@ -98,6 +113,12 @@ export class PlantsService {
     const plant = await this.plantModel.findByIdAndDelete(id);
     if (!plant) {
       throw new NotFoundException("No plant found with that ID");
+    }
+
+    if (plant.imageCover) {
+      await this.imagesService.deleteImage(plant.imageCover).catch(() => {
+        return null;
+      });
     }
 
     return {

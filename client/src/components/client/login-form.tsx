@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { loginWithEmailPassword } from "@/lib/api";
 import { useAuthStore } from "@/store/auth-store";
+import { useCartStore } from "@/store/cart-store";
 
 export default function LoginForm({
   role,
@@ -13,6 +14,7 @@ export default function LoginForm({
 }) {
   const router = useRouter();
   const login = useAuthStore((state) => state.login);
+  const mergeCart = useCartStore((state) => state.mergeCart);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -31,6 +33,9 @@ export default function LoginForm({
       }
 
       login(result.token, result.data.user);
+
+      const localCart = useCartStore.getState().cart;
+      await mergeCart(result.token, localCart);
 
       if (result.data.user.role === "admin") {
         router.push("/admin/plants");

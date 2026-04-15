@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   fetchPaymentQr,
@@ -35,13 +36,16 @@ export default function CheckoutInvoiceDialog({
   onClose,
   onPaidSuccess,
 }: CheckoutInvoiceDialogProps) {
-  const [method, setMethod] = useState<PaymentMethod>("CASH");
+  const router = useRouter();
+  const [method, setMethod] = useState<PaymentMethod>("TRANSFER");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingQr, setIsLoadingQr] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const [error, setError] = useState("");
   const [qrData, setQrData] = useState<PaymentQrData | null>(null);
   const [isPaid, setIsPaid] = useState(false);
+  const handledPaidRef = useRef(false);
 
   const bankName = useMemo(
     () => process.env.NEXT_PUBLIC_MB_BANK_NAME || "MB Bank",
@@ -55,13 +59,15 @@ export default function CheckoutInvoiceDialog({
 
   useEffect(() => {
     if (!open) {
-      setMethod("CASH");
+      setMethod("TRANSFER");
       setIsSubmitting(false);
       setIsLoadingQr(false);
       setIsVerifying(false);
+      setIsRedirecting(false);
       setError("");
       setQrData(null);
       setIsPaid(false);
+      handledPaidRef.current = false;
     }
   }, [open]);
 
@@ -125,6 +131,48 @@ export default function CheckoutInvoiceDialog({
 
     return () => clearInterval(timer);
   }, [isPaid, method, open, qrData, verifyPayment]);
+
+  useEffect(() => {
+    if (!open || !isPaid || handledPaidRef.current) {
+      return;
+    }
+
+    handledPaidRef.current = true;
+    setIsRedirecting(true);
+
+    let cancelled = false;
+
+    const run = async () => {
+      try {
+        await onPaidSuccess();
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        if (cancelled) {
+          return;
+        }
+
+        router.push("/order-success");
+        onClose();
+      } catch (paidSuccessError) {
+        handledPaidRef.current = false;
+        setError(
+          paidSuccessError instanceof Error
+            ? paidSuccessError.message
+            : "Co loi khi hoan tat don hang.",
+        );
+      } finally {
+        if (!cancelled) {
+          setIsRedirecting(false);
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isPaid, onClose, onPaidSuccess, open, router]);
 
   const handleConfirm = async () => {
     setError("");
@@ -254,6 +302,7 @@ export default function CheckoutInvoiceDialog({
             type="button"
             onClick={onClose}
             className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            disabled={isRedirecting}
           >
             Dong
           </button>
@@ -261,9 +310,15 @@ export default function CheckoutInvoiceDialog({
             type="button"
             onClick={() => void handleConfirm()}
             className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
-            disabled={isSubmitting || (method === "TRANSFER" && !isPaid)}
+            disabled={
+              isSubmitting ||
+              isRedirecting ||
+              (method === "TRANSFER" && !isPaid)
+            }
           >
-            {isSubmitting ? "Dang xu ly..." : "Xac nhan dat hang"}
+            {isSubmitting || isRedirecting
+              ? "Dang xu ly..."
+              : "Xac nhan dat hang"}
           </button>
         </div>
       </div>
